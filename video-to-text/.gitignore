@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Python 字节码缓存（.pyc 会嵌入编译时的绝对路径，泄露本机用户名，切勿入库）
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 运行时产物（脚本默认写到 /tmp；若把 --out-dir 指到仓库内，排除这些大文件）
+*.wav
+*.m4a
+*.mp4
+*.mp3
