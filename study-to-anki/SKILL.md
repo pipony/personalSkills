@@ -17,7 +17,7 @@ description: |
 ## 核心流程
 
 ```
-需求梳理 → 素材收集整理 → 生成结构化 Markdown → 用户审阅确认 → 生成 .apkg 文件
+需求梳理 → 素材收集整理 → 生成结构化 Markdown → 用户审阅确认 → 生成 .apkg 文件 →（可选）归档到 GitHub
 ```
 
 每一步都需要用户确认后才能进入下一步。不要跳过审阅环节。
@@ -206,6 +206,75 @@ python3 /path/to/study-to-anki/scripts/generate_apkg.py \
 1. 脚本输出显示正确的条目数量
 2. 输出文件大小合理（通常 50KB~500KB）
 3. 向用户报告文件位置和卡片数量
+
+---
+
+## 第五步：归档到 GitHub（可选）
+
+.apkg 生成并验证后，**主动询问用户**是否要把这次制作的牌组归档到 GitHub 仓库。只有用户明确同意才执行；用户拒绝或跳过则流程结束。
+
+建议提示语：「牌组已生成。是否要归档到 GitHub 仓库 `pipony/myAnkiDecks`？」
+
+### 归档仓库
+
+- 仓库地址：`git@github.com:pipony/myAnkiDecks.git`（SSH）
+- 用途：个人（AI）制作的 Anki 牌组归档。仓库根目录的 `README.md` 维护一张牌组清单表格，每归档一个牌组就往表格里追加一行。
+
+### 归档流程
+
+1. **克隆仓库到临时目录**：
+
+   ```bash
+   git clone git@github.com:pipony/myAnkiDecks.git /tmp/myAnkiDecks
+   ```
+
+2. **为本牌组建目录**：在仓库根目录下新建一个以主题命名的目录（如 `汽车车标学习/`），把本次生成的 `.apkg` 复制进去。目录名用能概括主题的中文名，不要用日期或随机串。
+
+3. **更新 README.md（关键）**：归档时**先读取仓库里已有的 `README.md`**，找到「## 牌组列表」下的表格，在表格末尾**追加一行描述本次归档的牌组**。四列内容：
+
+   - **目录**：本次新建的目录名
+   - **牌组**：`.apkg` 文件名
+   - **说明**：一句话简介（覆盖范围、分类、卡片张数等）
+   - **制作方式**：**如实**写明这个牌组是怎么做出来的——
+     - 素材/图片**来源**：来自某个公开数据集/网站/用户提供的材料，还是 AI 从零生成？有外部来源就写明出处（带上链接）
+     - 内容（字段）**谁生成**：通常是「AI 生成 + 用户审阅确认」
+     - 用什么**打包**：通常是 Python（genanki）
+     - **必须按本牌组的真实制作过程写，不要套用别的牌组的描述，不要编造来源。**
+
+   不要改动其它已有行。如果仓库还没有 `README.md`（首次归档），按下面的模板新建一个：
+
+   ```markdown
+   # myAnkiDecks
+
+   个人（AI）制作的anki牌组归档。
+
+   ## 牌组列表
+
+   | 目录 | 牌组 | 说明 | 制作方式 |
+   |------|------|------|----------|
+   | <主题目录> | <文件>.apkg | <简介> | <制作方式> |
+
+   ## 使用方法
+
+   1. 下载对应的 `.apkg` 文件。
+   2. 在 Anki 桌面版中选择「文件 → 导入」，或直接双击 `.apkg` 文件。
+   3. 牌组将出现在 Anki 中，可直接开始学习。
+   ```
+
+4. **提交并推送**：
+
+   ```bash
+   cd /tmp/myAnkiDecks
+   git config user.name "pipony"
+   git config user.email "pipony@users.noreply.github.com"
+   git add -A
+   git commit -m "Add <牌组名> Anki deck"
+   git push
+   ```
+
+   仓库默认分支为 `main`。若克隆后是空仓库，先 `git branch -M main` 再 `git push -u origin main`。
+
+5. **清理与反馈**：删除临时克隆 `rm -rf /tmp/myAnkiDecks`，向用户报告仓库地址 `https://github.com/pipony/myAnkiDecks` 以及本次新增的目录/文件。本地原始 `.apkg` 和工作目录不删改，归档只是把副本放进 git 仓库。
 
 ---
 
