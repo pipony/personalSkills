@@ -30,10 +30,11 @@ storage-analyzer 解决"磁盘满了"，但**明确把内存排除在外**。用
 - 持续监控/后台常驻；本 skill 是一次性快照。
 - 自动批量清理；每次动作都需用户点击 + 浏览器 confirm。
 
-## 3. 平台姿态
+## 3. 平台姿态与运行时
 
-- **macOS**：完整实现并**实测**（开发机即 Mac，Darwin 25.5）。
-- **Windows**：代码就位、走 PowerShell 路径，但**标注未实测**，等用户在 Windows 上跑反馈再调。与 storage-analyzer 一致。
+- **macOS**：完整实现并**实测**。运行时 = **Python 3**（用户本机已有 3.13）；脚本 `scripts/scan.py` / `server.py` / `build_report.py`。
+- **Windows**：代码就位但**标注未实测**，等用户在 Windows 上跑反馈再调。运行时 = **PowerShell**（Win10+ 系统自带，**零安装**）；脚本 `scripts/scan.ps1` / `server.ps1` / `build_report.ps1`。比 storage-analyzer"Windows 也要装 Python"更省事。
+- **共享**：`assets/report_template.html`、analysis JSON 契约、`references/*.md` 两边通用；只有 scan / server / build_report 按语言各一份。agent 据 OS 选 `.py` 或 `.ps1`。
 
 ## 4. 架构总览
 
@@ -60,9 +61,12 @@ memory-analyzer/
 │   ├── macos.md             # macOS 内存模型 + 进程分级参照
 │   └── windows.md           # Windows 内存模型 + 进程分级参照
 └── scripts/
-    ├── scan.py              # 只读扫描：进程 + 内存 → stdout JSON（带 --help）
-    ├── server.py            # 本地服务 + 受防护 POST /action（默认模式，带 --help）
-    └── build_report.py      # 静态只读 HTML（可选，分享用，无动作按钮，带 --help）
+    ├── scan.py              # macOS 只读扫描（Python，带 --help）
+    ├── server.py            # macOS 本地服务 + 受防护 POST /action（Python，带 --help）
+    ├── build_report.py      # macOS 静态只读 HTML（Python，可选）
+    ├── scan.ps1             # Windows 只读扫描（PowerShell，零安装）
+    ├── server.ps1           # Windows 本地服务 + 受防护 POST /action（PowerShell）
+    └── build_report.ps1     # Windows 静态只读 HTML（PowerShell，可选）
 ```
 
 ### 5.1 agent 无关 / 通用化原则（本 skill 的硬约束）
@@ -77,7 +81,7 @@ memory-analyzer/
 ln -s /Users/huangxindi/ai/skill-store/memory-analyzer ~/.claude/skills/memory-analyzer
 ```
 
-## 6. scan.py 输出 schema（只读）
+## 6. 扫描输出 schema（scan.py / scan.ps1 共用契约，只读）
 
 ```jsonc
 {
@@ -172,7 +176,7 @@ macOS 内存管理激进缓存，**"空闲内存=浪费"**。网页与 SKILL.md 
 - `SKILL.md` —— Claude Code 入口。frontmatter（`name`/`description` + 触发词）用于自动触发；正文与 README 一致（可 `参考 README.md`）。仅在 Claude Code 环境自动激活。
 - `AGENTS.md` —— 跨 agent 发现入口（Cursor/Gemini CLI/Codex/Copilot 等约定读取）。简短说明"这是个 agent 驱动的内存分析工具，工作流见 README.md，脚本在 scripts/"。
 
-**其他 agent 怎么用**：任何能跑 shell 的 agent，让它在工具目录执行 `scan.py` → 读 `references/<os>.md` + scan.json 做分级 → 写 analysis.json → 跑 `server.py`。流程命令与 Claude 完全一致，无任何 Claude 专属依赖。
+**其他 agent 怎么用**：任何能跑 shell 的 agent，先判断 OS——macOS 跑 `scripts/scan.py`、Windows 跑 `scripts/scan.ps1` → 读 `references/<os>.md` + scan.json 做分级 → 写 analysis.json → 跑对应的 `server.py`/`server.ps1`。两边产出的 JSON 契约一致，HTML 模板共享。无任何 Claude 专属依赖。
 
 **触发词**（写入 SKILL.md frontmatter，用于 Claude 自动触发；其他 agent 靠用户/README 引导）：内存占用高、电脑卡/慢、哪个进程吃内存、内存不够、释放内存、关掉某应用、结束某进程、memory/cpu 占用、"看下内存/进程"等。
 
@@ -180,7 +184,7 @@ macOS 内存管理激进缓存，**"空闲内存=浪费"**。网页与 SKILL.md 
 
 **铁律**：扫描全程只读；动作只在受防护的 server 端点执行，agent 本身在聊天里不发 kill 信号（用户在聊天说"帮我杀 X"也要先走网页/确认）；估算要标注为估算。
 
-## 13. 失败场景与退出码（scan.py）
+## 13. 失败场景与退出码（scan.py / scan.ps1）
 
 - **0**：正常。
 - **2**：不支持的 OS（非 darwin/windows）。
@@ -203,12 +207,13 @@ macOS 内存管理激进缓存，**"空闲内存=浪费"**。网页与 SKILL.md 
 1. `README.md`（agent 无关工作流真相源 + 人类用法 + 失败码）
 2. `SKILL.md`（Claude 入口：frontmatter + 触发词 + 正文同 README）
 3. `AGENTS.md`（跨 agent 发现入口，指向 README）
-4. `scripts/scan.py`（mac+win 只读扫描，带 `--help`）
-5. `scripts/server.py`（受防护动作服务，PID 双键，带 `--help`）
-6. `scripts/build_report.py`（静态只读 HTML，带 `--help`）
-7. `assets/report_template.html`（可视化网页）
-8. `references/macos.md`、`references/windows.md`（分级参照）
-9. 软链接接入 `~/.claude/skills/memory-analyzer`（Claude 侧）；其他 agent 侧由用户把目录指给对应工具
+4. `scripts/scan.py`（macOS 只读扫描，带 `--help`）
+5. `scripts/server.py`（macOS 受防护动作服务，PID 双键，带 `--help`）
+6. `scripts/build_report.py`（macOS 静态只读 HTML，带 `--help`）
+7. `scripts/scan.ps1` / `server.ps1` / `build_report.ps1`（Windows PowerShell 版，零安装，产出同一 JSON 契约）
+8. `assets/report_template.html`（可视化网页）
+9. `references/macos.md`、`references/windows.md`（分级参照）
+10. 软链接接入 `~/.claude/skills/memory-analyzer`（Claude 侧）；其他 agent 侧由用户把目录指给对应工具
 
 ## 16. 开放问题
 
