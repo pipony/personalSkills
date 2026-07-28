@@ -51,17 +51,26 @@ storage-analyzer 解决"磁盘满了"，但**明确把内存排除在外**。用
 
 ```
 memory-analyzer/
-├── SKILL.md                 # 中文 frontmatter + 铁律 + 4 步流程 + 执行准则
+├── SKILL.md                 # Claude Code 入口（frontmatter 触发）+ 正文=agent 无关工作流
+├── README.md                # 通用入口：人 + 任何 agent 都能照着跑（工作流的唯一真相源）
+├── AGENTS.md                # 跨 agent 发现入口（Cursor/Gemini/Codex 等读它，指向 README）
 ├── assets/
 │   └── report_template.html # 可视化网页模板（内存条 + 进程榜 + 三色卡片 + 动作按钮）
 ├── references/
 │   ├── macos.md             # macOS 内存模型 + 进程分级参照
 │   └── windows.md           # Windows 内存模型 + 进程分级参照
 └── scripts/
-    ├── scan.py              # 只读扫描：进程 + 内存 → stdout JSON
-    ├── server.py            # 本地服务 + 受防护 POST /action（默认模式）
-    └── build_report.py      # 静态只读 HTML（可选，分享用，无动作按钮）
+    ├── scan.py              # 只读扫描：进程 + 内存 → stdout JSON（带 --help）
+    ├── server.py            # 本地服务 + 受防护 POST /action（默认模式，带 --help）
+    └── build_report.py      # 静态只读 HTML（可选，分享用，无动作按钮，带 --help）
 ```
+
+### 5.1 agent 无关 / 通用化原则（本 skill 的硬约束）
+
+- **脚本即真相**：`scan.py`/`server.py`/`build_report.py` 是纯 Python 标准库、零第三方依赖、不依赖任何 agent 或 Claude 特性。任何能跑 shell 的 agent（Claude / GPT / Gemini / Cursor / Codex / Copilot）或人，都能直接运行。
+- **文档 agent 无关**：工作流写成"做这些步骤、跑这些命令"的中性描述，不出现 Claude 专属机制（如 skill 自动触发、特定工具调用格式）。`README.md` 是工作流的唯一真相源；`SKILL.md` 正文与之一致（仅多一层 Claude frontmatter 用于触发）；`AGENTS.md` 指向 `README.md` 供其他 agent 生态发现。
+- **仍需 agent 在环做分级**：三色分级靠 agent 读 `references/<os>.md` + scan.json 做判断（不内置规则分类器）。因此"无 agent 直接一键出分级网页"不在范围内——但"任何 agent 照 README 跑"在范围内。
+- **语言**：文档用中文（用户工作语言），不影响 agent 无关性（主流 agent 均支持中文）。
 
 接入方式（遵循用户 skill-store 约定）：
 ```bash
@@ -156,11 +165,20 @@ macOS 内存管理激进缓存，**"空闲内存=浪费"**。网页与 SKILL.md 
 
 模板两个替换令牌：`__REPORT_DATA__`（分析 JSON）、`__DELETE_CONFIG__`（`null`=静态只读 / `{token,endpoint}`=server 模式启用按钮）。沿用 storage-analyzer 模板机制。
 
-## 12. SKILL.md 触发与铁律
+## 12. 文档结构与铁律（agent 无关）
 
-- **触发词**：内存占用高、电脑卡/慢、哪个进程吃内存、内存不够、释放内存、关掉某应用、结束某进程、memory/cpu 占用、"看下内存/进程"等。
-- **排除**：用户明显指磁盘（磁盘满了/清理空间/C 盘满）→ 引导用 storage-analyzer。
-- **铁律**：扫描全程只读；动作只在受防护的 server 端点执行，agent 本身在聊天里不发 kill 信号（用户在聊天说"帮我杀 X"也要先走网页/确认）；估算要标注为估算。
+**三份文档分工（同一套工作流，不同入口）：**
+- `README.md` —— **唯一真相源**。完整工作流（扫描→分级→生成网页→小结）、脚本用法、铁律、失败码。人与任何 agent 都读它。每条脚本带 `--help`，即使只看帮助也能驱动。
+- `SKILL.md` —— Claude Code 入口。frontmatter（`name`/`description` + 触发词）用于自动触发；正文与 README 一致（可 `参考 README.md`）。仅在 Claude Code 环境自动激活。
+- `AGENTS.md` —— 跨 agent 发现入口（Cursor/Gemini CLI/Codex/Copilot 等约定读取）。简短说明"这是个 agent 驱动的内存分析工具，工作流见 README.md，脚本在 scripts/"。
+
+**其他 agent 怎么用**：任何能跑 shell 的 agent，让它在工具目录执行 `scan.py` → 读 `references/<os>.md` + scan.json 做分级 → 写 analysis.json → 跑 `server.py`。流程命令与 Claude 完全一致，无任何 Claude 专属依赖。
+
+**触发词**（写入 SKILL.md frontmatter，用于 Claude 自动触发；其他 agent 靠用户/README 引导）：内存占用高、电脑卡/慢、哪个进程吃内存、内存不够、释放内存、关掉某应用、结束某进程、memory/cpu 占用、"看下内存/进程"等。
+
+**排除**：用户明显指磁盘（磁盘满了/清理空间/C 盘满）→ 引导用 storage-analyzer。
+
+**铁律**：扫描全程只读；动作只在受防护的 server 端点执行，agent 本身在聊天里不发 kill 信号（用户在聊天说"帮我杀 X"也要先走网页/确认）；估算要标注为估算。
 
 ## 13. 失败场景与退出码（scan.py）
 
@@ -182,14 +200,16 @@ macOS 内存管理激进缓存，**"空闲内存=浪费"**。网页与 SKILL.md 
 
 ## 15. 交付物清单
 
-1. `SKILL.md`（中文，含 frontmatter/铁律/4 步/执行准则/失败码）
-2. `scripts/scan.py`（mac+win 只读扫描）
-3. `scripts/server.py`（受防护动作服务，PID 双键）
-4. `scripts/build_report.py`（静态只读 HTML）
-5. `assets/report_template.html`（可视化网页）
-6. `references/macos.md`、`references/windows.md`（分级参照）
-7. 软链接接入 `~/.claude/skills/memory-analyzer`
+1. `README.md`（agent 无关工作流真相源 + 人类用法 + 失败码）
+2. `SKILL.md`（Claude 入口：frontmatter + 触发词 + 正文同 README）
+3. `AGENTS.md`（跨 agent 发现入口，指向 README）
+4. `scripts/scan.py`（mac+win 只读扫描，带 `--help`）
+5. `scripts/server.py`（受防护动作服务，PID 双键，带 `--help`）
+6. `scripts/build_report.py`（静态只读 HTML，带 `--help`）
+7. `assets/report_template.html`（可视化网页）
+8. `references/macos.md`、`references/windows.md`（分级参照）
+9. 软链接接入 `~/.claude/skills/memory-analyzer`（Claude 侧）；其他 agent 侧由用户把目录指给对应工具
 
 ## 16. 开放问题
 
-无。范围、平台、安全底线、动作集均已确认。
+无。范围（内存/进程）、平台（Mac 优先 + Windows 代码就位）、安全底线（优雅退出为主 + 强制可选 + 系统进程永不可杀）、动作集（优雅/强制两档）、**通用化（仅文档通用：保留 agent 大脑、文档 agent 无关）** 均已确认。
