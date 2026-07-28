@@ -123,19 +123,18 @@ ln -s /Users/huangxindi/ai/skill-store/memory-analyzer ~/.claude/skills/memory-a
 2. **PID+名称双键**：分析 JSON 里白名单条目存 `{pid, name}`。执行时服务端用 `ps -p <pid>` 重新解析当前进程名，**必须与扫描记录一致**才执行；进程已退出或名字不符 → 拒绝（"进程已变更，已拒绝"）。
 3. **Host 头防 DNS rebinding**：只认 `127.0.0.1`/`localhost`，否则 403。
 4. **随机 token**：每次会话 `secrets.token_urlsafe(24)`，请求须带正确 token。
-5. **三套白名单** `quit ⊂ term ⊂ kill`（按分级填充）+ 每条逐项校验。
+5. **两套白名单** `GRACEFUL_ALLOW ⊂ FORCE_ALLOW`（按分级填充）+ 每条逐项校验。
 6. **浏览器端 confirm**：每个动作点击前 `confirm()`；强制结束额外醒目警告。
 
-## 9. 动作映射
+## 9. 动作映射（两个用户动作，内部按进程类型分支）
 
-| 模式 | macOS | Windows |
-|---|---|---|
-| 优雅退出(`quit`) | GUI App：`osascript -e 'tell application "X" to quit'`；后台进程：`kill -TERM <pid>` | `(Get-Process -Id <pid>).CloseMainWindow()` |
-| SIGTERM(`term`) | `kill -TERM <pid>` | `Stop-Process -Id <pid>`（不带 -Force） |
-| 强制结束(`kill`) | `kill -9 <pid>` 及进程组 | `Stop-Process -Id <pid> -Force` |
+| 用户动作 | 适用 | macOS | Windows |
+|---|---|---|---|
+| **优雅退出** `graceful` | 🟢🟡 默认动作 | GUI App：`osascript -e 'tell application "X" to quit'`；后台进程：`kill -TERM <pid>` | `(Get-Process -Id <pid>).CloseMainWindow()`（后台进程 `Stop-Process` 不带 -Force） |
+| **强制结束** `force` | 🟢🟡 可选，二次确认 | `kill -9 <pid>`；若是应用则对其**扫描记录的子进程 pid 逐一** kill，不杀整个进程组（避免误伤） | `Stop-Process -Id <pid> -Force` |
 
-- 默认给 🟢🟡 提供"优雅退出"；"强制结束"为可选，需二次确认；🔴 无按钮。
-- 分析 JSON 字段驱动按钮：`quit_targets`（{pid,name}）/ `term_targets` / `force_targets`；缺字段则不出按钮（与 storage-analyzer 的 `trash_paths` 机制同构）。
+- 🔴 无按钮。
+- 分析 JSON 字段驱动按钮：每项带 `graceful_targets` 与 `force_targets`（`{pid,name}` 列表）；缺字段则不出对应按钮（与 storage-analyzer 的 `trash_paths` 机制同构）。
 
 ## 10. 内存诚实性（必须做对）
 
