@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内存与进程分析报告</title>
+<style>
+  /* —— 调色板（dataviz validated default，light/dark 双模式）—— */
+  .report {
+    color-scheme: light;
+    --surface:        #fcfcfb;
+    --page:           #f9f9f7;
+    --ink:            #0b0b0b;
+    --ink-2:          #52514e;
+    --muted:          #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --s1:             #2a78d6;  /* app_memory */
+    --s2:             #eb6834;  /* file_cache */
+    --s3:             #1baf7a;  /* compressed */
+    --s4:             #eda100;  /* wired */
+    --free:           #d8d7d0;  /* free（recede）*/
+    --st-good:        #0ca30c;
+    --st-warn:        #b07d00;  /* warning 文字用深色变体（#fab219 在浅底不足3:1）*/
+    --st-warn-fill:   #fab219;
+    --st-crit:        #d03b3b;
+    --radius:         10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .report {
+      color-scheme: dark;
+      --surface:      #1a1a19;
+      --page:         #0d0d0d;
+      --ink:          #ffffff;
+      --ink-2:        #c3c2b7;
+      --muted:        #898781;
+      --grid:         #2c2c2a;
+      --baseline:     #383835;
+      --border:       rgba(255,255,255,0.10);
+      --s1:           #3987e5;
+      --s2:           #d95926;
+      --s3:           #199e70;
+      --s4:           #c98500;
+      --free:         #3a3a37;
+      --st-good:      #0ca30c;
+      --st-warn:      #fab219;
+      --st-warn-fill: #fab219;
+      --st-crit:      #e66767;
+    }
+  }
+  :root[data-theme="dark"] .report { color-scheme: dark;
+      --surface:#1a1a19; --page:#0d0d0d; --ink:#fff; --ink-2:#c3c2c7; --muted:#898781;
+      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --free:#3a3a37;
+      --st-good:#0ca30c; --st-warn:#fab219; --st-warn-fill:#fab219; --st-crit:#e66767; }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--page); color:var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height:1.5; }
+  .report { max-width: 880px; margin:0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; color: var(--ink-2); font-weight:600;
+    text-transform: uppercase; letter-spacing: .04em; }
+  .sysinfo { color: var(--muted); font-size: 13px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .card { background: var(--surface); border:1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+
+  /* hero 可释放 */
+  .hero { display:flex; align-items:baseline; gap:10px; margin: 2px 0 14px; }
+  .hero b { font-size: 34px; font-weight: 700; }
+  .hero span { color: var(--ink-2); font-size: 14px; }
+
+  /* 分段内存条 */
+  .bar { display:flex; height: 26px; border-radius: 7px; overflow:hidden; border:1px solid var(--border); }
+  .seg { height:100%; position:relative; cursor: default; transition: filter .12s; }
+  .seg + .seg { margin-left: 2px; }            /* 2px 表面间隙 */
+  .seg:hover { filter: brightness(1.08); }
+  .seg[data-tip]:hover::after { content: attr(data-tip); position:absolute; left:0; bottom:130%;
+    background: var(--ink); color: var(--surface); padding:4px 7px; border-radius:5px;
+    font-size:12px; white-space:nowrap; z-index:5; font-variant-numeric: tabular-nums; }
+  .legend { display:flex; flex-wrap:wrap; gap: 6px 16px; margin-top: 12px; font-size:13px; color:var(--ink-2); }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:middle; }
+  .swaprow { display:flex; align-items:center; gap:10px; margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+  .swapbar { flex:1; height: 10px; background: var(--grid); border-radius:5px; overflow:hidden; }
+  .swapbar > i { display:block; height:100%; background: var(--s2); }
+  .swapbar.alert > i { background: var(--st-crit); }
+
+  /* 排行榜 */
+  .rank-row { display:grid; grid-template-columns: 150px 1fr 86px; align-items:center; gap:10px; padding:5px 0; font-size:13px; }
+  .rank-name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:6px; }
+  .rank-track { background: var(--grid); border-radius:5px; height: 14px; overflow:hidden; }
+  .rank-fill { display:block; height:100%; background: var(--s1); border-radius: 0 4px 4px 0; }
+  .rank-meta { text-align:right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+
+  /* 建议 */
+  .advice { display:flex; flex-direction:column; gap:8px; }
+  .advice .pill { background: var(--page); border:1px solid var(--border); border-radius:7px; padding:8px 11px; font-size:13px; }
+  .risk { border-left: 3px solid var(--st-crit); padding-left:10px; color: var(--ink); }
+
+  /* 三色卡片 */
+  details.tier { background: var(--surface); border:1px solid var(--border); border-radius: var(--radius); margin: 8px 0; overflow:hidden; }
+  details.tier > summary { cursor:pointer; padding: 12px 14px; list-style:none; display:flex; align-items:center; gap:8px; }
+  details.tier > summary::-webkit-details-marker { display:none; }
+  .tier-tag { font-size:12px; font-weight:600; padding:2px 8px; border-radius:20px; }
+  .tier-tag.g { background: color-mix(in srgb, var(--st-good) 18%, transparent); color: var(--st-good); }
+  .tier-tag.y { background: color-mix(in srgb, var(--st-warn-fill) 26%, transparent); color: var(--st-warn); }
+  .tier-tag.r { background: color-mix(in srgb, var(--st-crit) 16%, transparent); color: var(--st-crit); }
+  .tier-name { font-weight:600; }
+  .tier-mem { margin-left:auto; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size:13px; }
+  .tier-body { padding: 0 14px 14px; font-size: 13.5px; color: var(--ink-2); }
+  .tier-body p { margin: 4px 0; }
+  .tier-body .lbl { color: var(--muted); }
+  pre.cmd { background: var(--page); border:1px solid var(--border); border-radius:7px; padding:8px 10px;
+    font-size:12.5px; overflow-x:auto; margin: 8px 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top: 6px; }
+  button { font: inherit; font-size:13px; padding: 6px 13px; border-radius:7px; cursor:pointer; border:1px solid var(--border);
+    background: var(--surface); color: var(--ink); transition: filter .1s, opacity .1s; }
+  button:hover { filter: brightness(.96); }
+  button:disabled { opacity:.55; cursor: default; }
+  .btn-grace { border-color: transparent; background: var(--s1); color:#fff; }
+  .btn-force { border-color: var(--st-crit); color: var(--st-crit); }
+  .btn-copy { color: var(--ink-2); }
+  .nobo { display:none; }
+
+  footer { color: var(--muted); font-size:12px; margin-top: 30px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="report">
+  <h1>内存与进程分析报告</h1>
+  <div id="sysinfo" class="sysinfo"></div>
+
+  <h2>总览</h2>
+  <div id="overview" class="card"></div>
+
+  <h2>建议先处理</h2>
+  <div id="advice" class="card advice"></div>
+
+  <h2>内存占用排行</h2>
+  <div id="ranking" class="card"></div>
+
+  <h2>可操作项（三色分级）</h2>
+  <div id="tiers"></div>
+
+  <h2>长期建议</h2>
+  <div id="longterm" class="card advice"></div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+  const DATA = __REPORT_DATA__;
+  const ACT  = __DELETE_CONFIG__;   // null（静态只读）或 {token, endpoint}
+
+  const TIER_META = {
+    green:  { tag:"g", icon:"🟢", label:"可安全退出" },
+    yellow: { tag:"y", icon:"🟡", label:"谨慎退出" },
+    red:    { tag:"r", icon:"🔴", label:"永不触碰" },
+  };
+
+  function fmt(n){
+    if (n == null || isNaN(n)) return "—";
+    const abs = Math.abs(n);
+    if (abs >= 1e9) return (n/1e9).toFixed(2) + " GB";
+    if (abs >= 1e6) return (n/1e6).toFixed(0) + " MB";
+    if (abs >= 1e3) return (n/1e3).toFixed(0) + " KB";
+    return n + " B";
+  }
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+
+  function el(html){ const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
+
+  function render(){
+    const sys = DATA.system || {};
+    document.getElementById("sysinfo").textContent =
+      `${sys.os === "darwin" ? "macOS" : "Windows"} ${sys.os_version || ""}  ·  物理内存 ${fmt(sys.total_mem)}` +
+      (DATA.generated_at ? `  ·  生成于 ${DATA.generated_at}` : "");
+
+    renderOverview(sys);
+    renderAdvice();
+    renderRanking();
+    renderTiers();
+    renderLongterm();
+    document.getElementById("foot").textContent =
+      ACT ? "由本地受防护服务提供动作（127.0.0.1）。关闭此终端窗口即停止。" : "静态只读报告（无动作按钮）。如需一键执行，请用 server 模式打开。";
+  }
+
+  function renderOverview(sys){
+    const m = sys.mem || {};
+    const total = sys.total_mem || (Object.values(m).reduce((a,b)=>a+(b||0),0)) || 1;
+    const segs = [
+      ["app_memory","应用内存", m.app_memory, "var(--s1)"],
+      ["file_cache","文件缓存(可回收)", m.file_cache, "var(--s2)"],
+      ["compressed","已压缩", m.compressed, "var(--s3)"],
+      ["wired","Wired(系统)", m.wired, "var(--s4)"],
+      ["free","空闲", m.free, "var(--free)"],
+    ];
+    const bar = el('<div class="bar"></div>');
+    segs.forEach(([k,label,val,color]) => {
+      const pctv = Math.max(0, (val||0)/total*100);
+      if (pctv < 0.3) return;
+      const s = el(`<div class="seg" style="width:${pctv}%;background:${color}" data-tip="${esc(label)} ${fmt(val)} · ${pctv.toFixed(1)}%"></div>`);
+      bar.appendChild(s);
+    });
+    const legend = el('<div class="legend"></div>');
+    segs.forEach(([k,label,val,color]) => {
+      legend.appendChild(el(`<span><i style="background:${color}"></i>${esc(label)} <b style="color:var(--ink)">${fmt(val)}</b></span>`));
+    });
+    // swap
+    const sw = sys.swap || {used:0,total:0};
+    const swPct = sw.total ? sw.used/sw.total*100 : 0;
+    const swapEl = el(
+      `<div class="swaprow">
+         <span>Swap</span>
+         <div class="swapbar ${swPct>50?'alert':''}"><i style="width:${Math.min(100,swPct)}%"></i></div>
+         <span>${fmt(sw.used)} / ${fmt(sw.total)}${swPct>50?' · ⚠ 偏高':''}</span>
+       </div>`);
+    const host = document.getElementById("overview");
+    host.innerHTML = "";
+    host.appendChild(bar);
+    host.appendChild(legend);
+    host.appendChild(swapEl);
+  }
+
+  function renderAdvice(){
+    const s = DATA.summary || {};
+    const host = document.getElementById("advice");
+    host.innerHTML = "";
+    host.appendChild(el(`<div class="hero"><b>${fmt(s.total_reclaimable)}</b><span>预计可释放（🟢+🟡 合计）</span></div>`));
+    (s.top_targets||[]).forEach((t,i) => host.appendChild(el(`<div class="pill">${i+1}. ${esc(t)}</div>`)));
+    if (s.highest_risk) host.appendChild(el(`<div class="pill risk">⚠ 最高风险：${esc(s.highest_risk)}</div>`));
+  }
+
+  function renderRanking(){
+    const host = document.getElementById("ranking");
+    host.innerHTML = "";
+    const rows = DATA.ranking || [];
+    if (!rows.length){ host.appendChild(el('<div class="rank-meta">无数据</div>')); return; }
+    const max = Math.max(...rows.map(r=>r.aggregate_mem||0), 1);
+    rows.slice(0,10).forEach(r => {
+      const tm = TIER_META[r.tier] || {tag:"g"};
+      const color = r.tier==="red"?"var(--st-crit)":r.tier==="yellow"?"var(--st-warn-fill)":"var(--st-good)";
+      host.appendChild(el(
+        `<div class="rank-row">
+           <span class="rank-name"><i class="dot" style="background:${color}"></i>${esc(r.name)}</span>
+           <span class="rank-track"><i class="rank-fill" style="width:${(r.aggregate_mem/max*100).toFixed(1)}%"></i></span>
+           <span class="rank-meta">${fmt(r.aggregate_mem)}${r.cpu!=null?` · ${r.cpu}%`:''}</span>
+         </div>`));
+    });
+  }
+
+  function renderTiers(){
+    const host = document.getElementById("tiers");
+    host.innerHTML = "";
+    const order = ["green","yellow","red"];
+    order.forEach(tier => {
+      (DATA.tiers?.[tier]||[]).forEach(item => {
+        const meta = TIER_META[tier];
+        const d = el(`<details class="tier" open><summary></summary><div class="tier-body"></div></details>`);
+        const sum = d.querySelector("summary");
+        sum.appendChild(el(`<span class="tier-tag ${meta.tag}">${meta.icon} ${meta.label}</span>`));
+        sum.appendChild(el(`<span class="tier-name">${esc(item.name)}</span>`));
+        sum.appendChild(el(`<span class="tier-mem">${fmt(item.mem)}</span>`));
+        const body = d.querySelector(".tier-body");
+        if (item.desc) body.appendChild(el(`<p>${esc(item.desc)}</p>`));
+        if (item.risk) body.appendChild(el(`<p><span class="lbl">风险：</span>${esc(item.risk)}</p>`));
+        if (item.why_no_button) body.appendChild(el(`<p><span class="lbl">为何不能直接动：</span>${esc(item.why_no_button)}</p>`));
+        if (item.indirect_release) body.appendChild(el(`<p><span class="lbl">间接释放：</span>${esc(item.indirect_release)}</p>`));
+        const acts = el('<div class="actions"></div>');
+        if (item.command){
+          acts.appendChild(el(`<pre class="cmd"><code>${esc(item.command)}</code></pre>`));
+          acts.appendChild(el(`<button class="btn-copy" onclick="copyCmd(this)">复制命令</button>`));
+        }
+        // 按钮仅在 server 模式 且 有 targets 时出现；红档永不出按钮
+        if (ACT && tier !== "red"){
+          if (item.graceful_targets && item.graceful_targets.length)
+            acts.appendChild(el(`<button class="btn-grace" onclick="doAction('graceful', ${esc(JSON.stringify(item.graceful_targets))}, this)">优雅退出</button>`));
+          if (item.force_targets && item.force_targets.length)
+            acts.appendChild(el(`<button class="btn-force" onclick="doAction('force', ${esc(JSON.stringify(item.force_targets))}, this)">强制结束</button>`));
+        }
+        body.appendChild(acts);
+        host.appendChild(d);
+      });
+    });
+    if (!host.children.length) host.appendChild(el('<div class="card">无可操作项。</div>'));
+  }
+
+  function renderLongterm(){
+    const host = document.getElementById("longterm");
+    host.innerHTML = "";
+    (DATA.summary?.long_term||[]).forEach(t => host.appendChild(el(`<div class="pill">${esc(t)}</div>`)));
+    if (!host.children.length) host.appendChild(el('<div class="pill">无</div>'));
+  }
+
+  async function doAction(mode, targets, btn){
+    if (!ACT) return;
+    const sure = confirm(mode === "force"
+      ? "⚠️ 强制结束会立即杀死进程，可能丢失未保存数据。确认？"
+      : "确认优雅退出该进程/应用？");
+    if (!sure) return;
+    const prev = btn.textContent; btn.disabled = true; btn.textContent = "执行中…";
+    try {
+      const r = await fetch(ACT.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: ACT.token, mode, targets })
+      });
+      const res = await r.json();
+      if (res.ok){ btn.textContent = "已完成 ✓"; }
+      else {
+        const why = (res.failed && res.failed[0]) ? res.failed[0].reason : "未知";
+        btn.textContent = "失败：" + why; btn.disabled = false;
+      }
+    } catch (e){ btn.textContent = "请求失败"; btn.disabled = false; }
+  }
+
+  function copyCmd(btn){
+    const code = btn.parentElement.querySelector("code");
+    if (!code) return;
+    navigator.clipboard.writeText(code.textContent).then(()=>{ const t=btn.textContent; btn.textContent="已复制 ✓"; setTimeout(()=>btn.textContent=t,1200); });
+  }
+
+  render();
+</script>
+</body>
+</html>
