@@ -4,3 +4,7 @@
 
 # 通用临时/日志
 *.log
+
+# Python
+__pycache__/
+*.pyc
