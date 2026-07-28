@@ -16,6 +16,7 @@ ln -s /path/to/personalSkills/<skill>  <项目>/.claude/skills/<skill>  # 项目
 | [study-to-anki](./study-to-anki) | 学习主题 / 材料 → 结构化 Markdown → 可导入 Anki 的 `.apkg` 闪卡 | 「帮我做 XXX 的闪卡」「把 XXX 做成 Anki 卡片」 |
 | [video-to-text](./video-to-text) | 小红书 / B站视频 / 小宇宙播客 → 干净的 Markdown 文字稿 | 丢一个上述平台链接，说「转文字稿」「出文案」「做字幕」 |
 | [skill-architect-mentor](./skill-architect-mentor) | 深度拆解任意 Agent Skill 的设计思想，产出 11 节学习报告（MD + HTML） | 「拆解这个 skill」「分析这个 skill 是怎么设计的」+ GitHub URL / 本地路径 |
+| [memory-analyzer](./memory-analyzer) | 内存/进程只读分析 → 三色安全分级 → 可视化网页 → 一键优雅退出/强制结束 | 「内存占用高」「哪个进程吃内存」「关掉某应用」「释放内存」 |
 
 ---
 
@@ -38,6 +39,14 @@ ln -s /path/to/personalSkills/<skill>  <项目>/.claude/skills/<skill>  # 项目
 - **三条写作原则**：原文佐证、术语就近解释、英文原文附翻译。
 - **可复刻点**：阶段→报告章节映射保证不漏节、检查点机制、heavy reference 拆文件。
 
+### memory-analyzer
+对 macOS/Windows 做只读的**内存与运行中进程**分析，三色分级（🟢可安全退出 / 🟡谨慎退出 / 🔴永不触碰），产出交互式可视化网页，安全操作（优雅退出 / 强制结束）可在网页一键执行。架构同磁盘版 `storage-analyzer`，但对象是内存/进程。
+- **流程**：只读扫描 → agent 三色分级 → 交互网页 → 一键安全动作 → 小结。
+- **运行时**：macOS 用 Python（`scripts/*.py`，已实测）；Windows 用 PowerShell（`scripts/*.ps1`，零安装、代码就位未实测）。
+- **设计脊柱**：scan 只读 + PID+comm 双键（堵死 pid 复用杀错）+ 六层防护动作端点 + 内存诚实性（"空闲≈浪费"、文件缓存自动回收）。
+- **agent 无关**：`README.md` 是工作流唯一真相源，`SKILL.md`/`AGENTS.md` 为不同 agent 生态入口，任何能跑 shell 的 agent 都能用。
+- **可复刻点**：脚本/文档二分、双键安全模型、analysis JSON 契约驱动按钮（同 storage-analyzer 的 `trash_paths` 思路）、跨运行时共享模板/契约/分级文档。
+
 ---
 
 ## 目录结构
@@ -47,9 +56,14 @@ personalSkills/
 ├── README.md
 ├── study-to-anki/         # SKILL.md + scripts/generate_apkg.py
 ├── video-to-text/         # SKILL.md + scripts/transcribe.py
-└── skill-architect-mentor/
-    ├── SKILL.md           # 入口与编排
-    ├── analysis-guide.md  # 7 阶段分析方法论
-    ├── report-template.md # 11 节报告模板
-    └── scripts/report_to_html.py
+├── skill-architect-mentor/
+│   ├── SKILL.md           # 入口与编排
+│   ├── analysis-guide.md  #  7 阶段分析方法论
+│   ├── report-template.md # 11 节报告模板
+│   └── scripts/report_to_html.py
+└── memory-analyzer/       # 内存/进程分析（agent 无关）
+    ├── README.md / SKILL.md / AGENTS.md
+    ├── assets/report_template.html
+    ├── references/{macos,windows}.md
+    └── scripts/{scan,server,build_report}.{py,ps1} + safety.py
 ```
