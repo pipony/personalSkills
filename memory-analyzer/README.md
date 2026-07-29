@@ -34,12 +34,15 @@ pwsh scripts/scan.ps1 > "$env:TEMP\mem_scan.json"     # 或 powershell
 
 产出 `{system:{os,total_mem,mem{...},swap{...}}, processes:[{pid,ppid,user,rss,cpu,name,comm,kind}...], denied:[...]}`。
 
-### 2. 分析分级（agent 的大脑）
+### 2. 分析分级（agent 的大脑，或用规则分类器自动）
 
-1. 读 `system.os` 选平台，读 `references/macos.md` 或 `references/windows.md`。
-2. 读 `/tmp/mem_scan.json`：按父进程把子进程**聚合成应用**，取 **Top N** 内存占用。
-3. 把"有动作决策"的项分到三色（见下）。系统进程、海量小进程不进三色。
-4. 写 `/tmp/mem_analysis.json`（**analysis JSON 契约见文末附录**）。
+**方式 A — 规则分类器自动出报告（无需 agent）**：
+```bash
+python3 scripts/classify.py /tmp/mem_scan.json /tmp/mem_analysis.json   # Windows: classify.ps1
+```
+按 `app_root` 聚合应用、三色分级、target 取主进程，**列出所有达到阈值的应用**。agent 可在此基础上精修（追因、加风险说明）。
+
+**方式 B — agent 手动分级**：读 `references/<os>.md` + scan.json → 按父进程聚合成应用、Top N、三色分级 → 写 `/tmp/mem_analysis.json`（**analysis JSON 契约见文末附录**）。
 
 ### 3. 生成网页
 
@@ -50,7 +53,7 @@ python3 scripts/server.py /tmp/mem_analysis.json        # Ctrl+C 退出
 # Windows: pwsh scripts/server.ps1 /tmp/mem_analysis.json
 ```
 
-server 绑 `127.0.0.1` + 随机端口 + 随机 token。🟢🟡 项有「优雅退出」「强制结束」按钮；🔴 永无按钮。
+server 绑 `127.0.0.1` + 随机端口 + 随机 token。🟢🟡 项有「优雅退出」「强制结束」按钮；🔴 永无按钮。**网页右上角「🔄 刷新」会重跑 scan+classify 并实时刷新页面状态/应用/数据**（仅 server 模式；token 校验，等同 `/refresh` 端点）。
 
 **可选：静态只读 HTML（分享/留存用，无按钮，`file://` 打不开动作）**
 

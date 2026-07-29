@@ -122,6 +122,8 @@
   .btn-grace { border-color: transparent; background: var(--s1); color:#fff; }
   .btn-force { border-color: var(--st-crit); color: var(--st-crit); }
   .btn-copy { color: var(--ink-2); }
+  .btn-refresh { font-size: 13px; padding: 4px 11px; margin-left: 8px; vertical-align: middle;
+    color: var(--ink-2); border-color: var(--border); }
   .nobo { display:none; }
 
   footer { color: var(--muted); font-size:12px; margin-top: 30px; text-align:center; }
@@ -129,7 +131,7 @@
 </head>
 <body>
 <div class="report">
-  <h1>内存与进程分析报告</h1>
+  <h1>内存与进程分析报告 <button id="refresh-btn" class="btn-refresh" onclick="refreshData(this)">🔄 刷新</button></h1>
   <div id="sysinfo" class="sysinfo"></div>
 
   <h2>总览</h2>
@@ -151,7 +153,7 @@
 </div>
 
 <script>
-  const DATA = __REPORT_DATA__;
+  let DATA = __REPORT_DATA__;
   const ACT  = __DELETE_CONFIG__;   // null（静态只读）或 {token, endpoint}
 
   const TIER_META = {
@@ -320,6 +322,18 @@
     const code = btn.parentElement.querySelector("code");
     if (!code) return;
     navigator.clipboard.writeText(code.textContent).then(()=>{ const t=btn.textContent; btn.textContent="已复制 ✓"; setTimeout(()=>btn.textContent=t,1200); });
+  }
+
+  async function refreshData(btn){
+    if (!ACT){ alert("静态报告不支持刷新，请用 server 模式打开"); return; }
+    const prev = btn.textContent; btn.disabled = true; btn.textContent = "刷新中…";
+    try {
+      const r = await fetch("/refresh", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: ACT.token }) });
+      const res = await r.json();
+      if (res.ok){ DATA = res.analysis; render(); btn.textContent = "已刷新 ✓"; setTimeout(()=>{ btn.textContent = prev; btn.disabled = false; }, 1200); }
+      else { btn.textContent = "失败：" + (res.reason || ""); btn.disabled = false; }
+    } catch (e){ btn.textContent = "请求失败"; btn.disabled = false; }
   }
 
   render();

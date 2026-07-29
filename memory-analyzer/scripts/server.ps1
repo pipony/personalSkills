@@ -38,16 +38,34 @@ function Get-CurrentComm($targetPid) {
 
 # —— 载入 analysis + 构建白名单 ——
 if (-not $AnalysisJson) { [Console]::Error.WriteLine('用法: server.ps1 <analysis.json>'); exit 1 }
-$analysis = Get-Content -Raw $AnalysisJson | ConvertFrom-Json
+$script:analysis = Get-Content -Raw $AnalysisJson | ConvertFrom-Json
 
-$Grace = @{}; $Force = @{}
-foreach ($tier in 'green','yellow') {
-    $items = $analysis.tiers.$tier
-    if (-not $items) { continue }
-    foreach ($item in $items) {
-        foreach ($t in $item.graceful_targets) { if ($t) { $Grace["$($t.pid)|$($t.comm)"] = $true } }
-        foreach ($t in $item.force_targets)   { if ($t) { $Force["$($t.pid)|$($t.comm)"] = $true } }
+function Build-Allowlists {
+    $script:Grace = @{}; $script:Force = @{}
+    foreach ($tier in 'green','yellow') {
+        $items = $script:analysis.tiers.$tier
+        if (-not $items) { continue }
+        foreach ($item in $items) {
+            foreach ($t in $item.graceful_targets) { if ($t) { $script:Grace["$($t.pid)|$($t.comm)"] = $true } }
+            foreach ($t in $item.force_targets)   { if ($t) { $script:Force["$($t.pid)|$($t.comm)"] = $true } }
+        }
     }
+}
+Build-Allowlists
+
+function Rebuild-Html {
+    $tpl = Get-Content -Raw $TEMPLATE
+    $dj = $script:analysis | ConvertTo-Json -Depth 20 -Compress
+    $script:Html = $tpl.Replace('__REPORT_DATA__', $dj).Replace('__DELETE_CONFIG__', "{`"token`":`"$script:Token`",`"endpoint`":`"/action`"}")
+}
+
+function Do-Refresh {
+    $sp = Join-Path $env:TEMP 'mem_scan.json'; $ap = Join-Path $env:TEMP 'mem_analysis.json'
+    & $script:PSBin (Join-Path $HERE 'scan.ps1')    | Out-File -Encoding UTF8 $sp
+    & $script:PSBin (Join-Path $HERE 'classify.ps1') $sp $ap
+    $script:analysis = Get-Content -Raw $ap | ConvertFrom-Json
+    Build-Allowlists
+    Rebuild-Html
 }
 
 function Test-Action($t, $mode) {
@@ -77,11 +95,10 @@ function Invoke-Force($t) {
 # —— token + 模板注入 ——
 $rngBytes = New-Object byte[] 24
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($rngBytes)
-$Token = [Convert]::ToBase64String($rngBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-
-$tpl = Get-Content -Raw $TEMPLATE
-$dataJson = $analysis | ConvertTo-Json -Depth 20 -Compress
-$Html = $tpl.Replace('__REPORT_DATA__', $dataJson).Replace('__DELETE_CONFIG__', "{`"token`":`"$Token`",`"endpoint`":`"/action`"}")
+$script:Token = [Convert]::ToBase64String($rngBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+# 刷新用的解释器：优先 pwsh，回退 powershell
+$script:PSBin = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+Rebuild-Html
 
 # —— 找一个空闲端口 ——
 $tl = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -120,13 +137,16 @@ try {
                     $resp.OutputStream.Write($bytes, 0, $bytes.Length)
                 } else { $resp.StatusCode = 404 }
             }
-            elseif ($req.HttpMethod -eq 'POST' -and $req.Url.AbsolutePath -eq '/action') {
+            elseif ($req.HttpMethod -eq 'POST' -and $req.Url.AbsolutePath -in '/action','/refresh') {
                 $sr = New-Object IO.StreamReader($req.InputStream)
                 $body = $sr.ReadToEnd(); $sr.Dispose()
-                try { $reqobj = $body | ConvertFrom-Json } catch { Send-Json $resp 400 @{ok=$false;reason='请求格式错误'}; $body=$null }
+                try { $reqobj = $body | ConvertFrom-Json } catch { Send-Json $resp 400 @{ok=$false;reason='请求格式错误'}; $reqobj=$null }
                 if ($reqobj) {
                     if ($reqobj.token -ne $Token) {
                         Send-Json $resp 403 @{ok=$false;reason='token 无效'}
+                    } elseif ($req.Url.AbsolutePath -eq '/refresh') {
+                        try { Do-Refresh; Send-Json $resp 200 @{ok=$true; analysis=$script:analysis} }
+                        catch { Send-Json $resp 500 @{ok=$false; reason="刷新失败: $($_.Exception.Message)"} }
                     } else {
                         $mode = $reqobj.mode
                         $fn = if ($mode -eq 'graceful') { 'Invoke-Graceful' } elseif ($mode -eq 'force') { 'Invoke-Force' } else { $null }

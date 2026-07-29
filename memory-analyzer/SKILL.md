@@ -29,7 +29,7 @@ python3 scripts/scan.py > /tmp/mem_scan.json        # macOS
 pwsh scripts/scan.ps1 > "$env:TEMP\mem_scan.json"   # Windows
 ```
 
-**2. 分析分级（你来做）**：读 `system.os` → 读 `references/macos.md` 或 `references/windows.md` → 读 `/tmp/mem_scan.json` → 按父进程聚合成应用、取 Top N、三色分级（仅"有动作决策"的项进三色）→ 写 `/tmp/mem_analysis.json`（契约见 README 附录）。分级要点：
+**2. 分析分级**：可先用规则分类器自动出报告 `python3 scripts/classify.py /tmp/mem_scan.json /tmp/mem_analysis.json`（按 app_root 聚合、三色分级、target 主进程，列出所有达阈值应用），再按 `references/<os>.md` 精修。分级要点：
 - 🔴 系统关键（kernel_task/launchd/WindowServer/lsass…）→ 只展示，**绝无按钮**。
 - 🟡 用户应用（浏览器/IDE/通讯…，有未保存状态风险）→ `graceful_targets` + `force_targets`。
 - 🟢 可判定自动重启/无状态（Spotlight 索引等，**很少**）→ 同上。
@@ -39,7 +39,7 @@ pwsh scripts/scan.ps1 > "$env:TEMP\mem_scan.json"   # Windows
 ```bash
 python3 scripts/server.py /tmp/mem_analysis.json    # 自动开浏览器，Ctrl+C 退出
 ```
-可选静态只读：`python3 scripts/build_report.py /tmp/mem_analysis.json ~/Desktop/memory-report.html`（无按钮）。
+可选静态只读：`python3 scripts/build_report.py /tmp/mem_analysis.json ~/Desktop/memory-report.html`（无按钮）。**网页右上角「🔄 刷新」会重跑 scan+classify 实时刷新**（server 模式）。
 
 **4. 小结**：结论先行——可释放约多少、先处理哪 2-3 个、最高风险一项。
 

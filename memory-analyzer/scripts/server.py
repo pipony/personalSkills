@@ -62,9 +62,25 @@ def force(t):
 def make_handler(analysis, allowlists, token):
     with open(TEMPLATE, encoding="utf-8") as f:
         tpl = f.read()
-    injected = (tpl
-                .replace("__REPORT_DATA__", json.dumps(analysis, ensure_ascii=False))
-                .replace("__DELETE_CONFIG__", json.dumps({"token": token, "endpoint": "/action"})))
+    state = {"analysis": analysis, "allowlists": allowlists, "tpl": tpl}
+
+    def rebuild():
+        state["injected"] = (state["tpl"]
+                             .replace("__REPORT_DATA__", json.dumps(state["analysis"], ensure_ascii=False))
+                             .replace("__DELETE_CONFIG__", json.dumps({"token": token, "endpoint": "/action"})))
+    rebuild()
+
+    def do_refresh():
+        """重跑 scan.py + classify.py，重载 analysis 与白名单（token 不变）。"""
+        scan_path, an_path = "/tmp/mem_scan.json", "/tmp/mem_analysis.json"
+        with open(scan_path, "w") as f:
+            subprocess.run([sys.executable, os.path.join(HERE, "scan.py")],
+                           stdout=f, check=True)
+        subprocess.run([sys.executable, os.path.join(HERE, "classify.py"), scan_path, an_path],
+                       check=True)
+        state["analysis"] = json.load(open(an_path))
+        state["allowlists"] = safety.build_allowlists(state["analysis"])
+        rebuild()
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -79,7 +95,7 @@ def make_handler(analysis, allowlists, token):
                 self.send_error(403); return
             if urlparse(self.path).path not in ("/", "/index.html"):
                 self.send_error(404); return
-            b = injected.encode("utf-8")
+            b = state["injected"].encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(b)))
@@ -89,8 +105,7 @@ def make_handler(analysis, allowlists, token):
         def do_POST(self):
             if not self._host_ok():
                 self.send_error(403); return
-            if urlparse(self.path).path != "/action":
-                self.send_error(404); return
+            path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", 0))
             try:
                 req = json.loads(self.rfile.read(length) or "{}")
@@ -98,22 +113,32 @@ def make_handler(analysis, allowlists, token):
                 self._json(400, {"ok": False, "reason": "请求格式错误"}); return
             if req.get("token") != token:
                 self._json(403, {"ok": False, "reason": "token 无效"}); return
-            mode = req.get("mode")
-            targets = req.get("targets", [])
-            fn = graceful if mode == "graceful" else force if mode == "force" else None
-            if fn is None:
-                self._json(400, {"ok": False, "reason": "未知动作模式"}); return
-            done, failed = [], []
-            for t in targets:
-                ok, reason = safety.validate_action(t, allowlists, mode)
-                if not ok:
-                    failed.append({"pid": t["pid"], "name": t.get("name"), "reason": reason})
-                    continue
-                if fn(t):
-                    done.append({"pid": t["pid"], "name": t.get("name"), "action": mode})
-                else:
-                    failed.append({"pid": t["pid"], "name": t.get("name"), "reason": "进程已退出"})
-            self._json(200, {"ok": not failed, "done": done, "failed": failed})
+
+            if path == "/action":
+                mode = req.get("mode")
+                targets = req.get("targets", [])
+                fn = graceful if mode == "graceful" else force if mode == "force" else None
+                if fn is None:
+                    self._json(400, {"ok": False, "reason": "未知动作模式"}); return
+                done, failed = [], []
+                for t in targets:
+                    ok, reason = safety.validate_action(t, state["allowlists"], mode)
+                    if not ok:
+                        failed.append({"pid": t["pid"], "name": t.get("name"), "reason": reason})
+                        continue
+                    if fn(t):
+                        done.append({"pid": t["pid"], "name": t.get("name"), "action": mode})
+                    else:
+                        failed.append({"pid": t["pid"], "name": t.get("name"), "reason": "进程已退出"})
+                self._json(200, {"ok": not failed, "done": done, "failed": failed})
+            elif path == "/refresh":
+                try:
+                    do_refresh()
+                except Exception as e:
+                    self._json(500, {"ok": False, "reason": f"刷新失败: {e}"}); return
+                self._json(200, {"ok": True, "analysis": state["analysis"]})
+            else:
+                self.send_error(404)
 
         def _json(self, code, obj):
             b = json.dumps(obj, ensure_ascii=False).encode("utf-8")

@@ -17,12 +17,16 @@ SYSTEM_BLACKLIST = [
     "System", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
     "services.exe", "lsass.exe", "svchost.exe", "dwm.exe", "explorer.exe",
 ]
+SYSTEM_BLACKLIST_LOWER = {b.lower() for b in SYSTEM_BLACKLIST}
 
 
 def is_system_critical(name, comm):
-    """name 或 comm 命中黑名单即返回 True。"""
-    hay = f"{name} {comm}".lower()
-    return any(b.lower() in hay for b in SYSTEM_BLACKLIST)
+    """进程名或 comm 的可执行文件名【精确】命中黑名单即返回 True。
+    用精确匹配而非子串：避免 Windows 的 "System" 误伤 macOS 的 /System/ 路径等假阳性。"""
+    nm = (name or "").strip().lower()
+    base = (comm or "").rsplit("/", 1)[-1].lower()
+    bl = SYSTEM_BLACKLIST_LOWER
+    return nm in bl or base in bl
 
 
 def current_comm(pid):
