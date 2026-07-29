@@ -44,10 +44,14 @@ agent 读 scan.json 后，按本文件把"有动作决策"的进程分到 🟢/�
 
 风险点：未保存编辑、浏览器标签页/表单、下载中断。优雅退出（`osascript quit` / SIGTERM）让应用有机会保存；强制结束（SIGKILL）则可能丢数据。每项写明风险。
 
-## 聚合规则
+## 聚合规则（铁律：按 app_root 分组，target 必须是主进程）
 
-- 同一 `.app` 的主进程 + 它的所有子进程（同 bundle 的 Helper/Renderer 等）聚合成一个"应用"项，`aggregate_mem` = 各 `rss` 之和。
-- 聚合后进 Top N 排行；三色卡片里该应用带 `graceful_targets`/`force_targets`（主进程 pid，或主要子进程 pid 列表）。
+- **按 `app_root`（最外层 .app 路径）分组**：scan 已为每个进程算出 `app_root`。同一 `app_root` 的主进程 + 所有子进程（Helper/Renderer/GPU 等）聚合成一个"应用"项，`aggregate_mem` = 各 `rss` 之和。不同 `app_root` = 不同应用，**绝不混组**。
+  - 反例：`WeChat`（`/Applications/WeChat.app`）和 `wechatwebdevtools`（`/Applications/wechatwebdevtools.app`，是**微信开发者工具，另一个 app**）`app_root` 不同，必须分开。
+- **target 必须是主进程（`is_main_app=True`）**：`graceful_targets`/`force_targets` 里放的是 comm 形如 `<app_root>/Contents/MacOS/<binary>`、`is_main_app=True` 的那个 pid。**绝不能放 helper/子进程的 pid。**
+  - 为什么：杀 helper（如 `WeChatAppEx Helper (Renderer)`）应用会立即重生、主程序毫发无伤——用户会看到"点了没反应"。优雅退出/强制结束只有打在主进程上才真正退出整个应用。
+  - 找主进程：在 scan 里取该 `app_root` 下 `is_main_app=True` 的进程（通常 ppid=1）。
+- 聚合后进 Top N 排行；三色卡片里该应用带 `graceful_targets`/`force_targets`（主进程）。优雅退出走 `osascript quit`（整应用），SIGTERM 兜底也打主 pid。
 
 ## 命令备忘
 

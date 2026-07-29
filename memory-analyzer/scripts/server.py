@@ -16,15 +16,33 @@ import safety  # noqa: E402
 TEMPLATE = os.path.join(HERE, "..", "assets", "report_template.html")
 
 
+def _alive(pid):
+    """pid 是否还在（os.kill 0 探测）。"""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 存在但属别的用户
+
+
 def graceful(t):
-    """优雅退出：app→osascript quit(3s 超时)，统一 SIGTERM 兜底。"""
+    """优雅退出。
+    app：先 osascript quit（退出整个应用含所有 helper，8s 超时），成功则返回；
+         未退出则 SIGTERM 打主 pid 兜底。
+    process：直接 SIGTERM。
+    注意：target 的 pid 必须是应用主进程（由分级保证），不能是 helper——
+    杀 helper 应用会立即重生，参见 references/macos.md。"""
     pid = t["pid"]
     if t.get("kind") == "app":
         try:
             subprocess.run(["osascript", "-e", f'tell application "{t["name"]}" to quit'],
-                           timeout=3, capture_output=True)
+                           timeout=8, capture_output=True)
         except Exception:
             pass
+        if not _alive(pid):
+            return True
     try:
         os.kill(pid, signal.SIGTERM)
         return True

@@ -56,21 +56,21 @@ def collect_memory():
     }
 
 
-def app_name_and_bundle(comm):
-    """从 comm 路径反推 .app 展示名与 bundle_id（尽力而为）。bundle_id 不用于动作逻辑，留作元信息。"""
-    m = re.search(r"(/.+?\.app)/Contents/MacOS/", comm)
-    if not m:
-        return os.path.basename(comm), None, "process"
-    app_path = m.group(1)
-    name = os.path.basename(app_path)[:-4]  # 去 .app
-    bid = None
-    try:
-        bid = subprocess.check_output(
-            ["defaults", "read", app_path + "/Contents/Info", "CFBundleIdentifier"],
-            stderr=subprocess.DEVNULL, text=True, timeout=2).strip()
-    except Exception:
-        pass
-    return name, bid, "app"
+def app_info(comm):
+    """从 comm 路径反推 app 信息（纯函数，无 subprocess，可测）。
+    返回 {name, kind, app_root, is_main_app, bundle_id}。
+    - app_root = 最外层 .app 路径（把 helper 归到所属 app，区分 WeChat vs wechatdevtools）。
+    - is_main_app = 该 comm 是否就是 app_root 的直接可执行文件（主进程），用于"优雅退出 app"选对 pid。"""
+    apps = re.findall(r"(/.+?\.app)(?=/|$)", comm)
+    if not apps:
+        return {"name": os.path.basename(comm), "kind": "process",
+                "app_root": None, "is_main_app": False, "bundle_id": None}
+    app_root = apps[0]  # 最外层（非贪婪，第一个即最外）
+    name = os.path.basename(app_root)[:-4]  # 去 .app
+    # 主进程 = comm 恰好是 app_root/Contents/MacOS/<binary>（无更深嵌套 .app）
+    is_main = re.match(r"^" + re.escape(app_root) + r"/Contents/MacOS/[^/]+$", comm) is not None
+    return {"name": name, "kind": "app", "app_root": app_root,
+            "is_main_app": is_main, "bundle_id": None}
 
 
 def collect_processes():
@@ -86,11 +86,12 @@ def collect_processes():
         except ValueError:
             continue
         comm = parts[5].strip()
-        name, bundle_id, kind = app_name_and_bundle(comm)
+        ai = app_info(comm)
         procs.append({
             "pid": pid, "ppid": ppid, "user": user,
             "rss": rss_kb * 1024, "cpu": cpu,
-            "name": name, "comm": comm, "bundle_id": bundle_id, "kind": kind,
+            "name": ai["name"], "comm": comm, "bundle_id": ai["bundle_id"],
+            "kind": ai["kind"], "app_root": ai["app_root"], "is_main_app": ai["is_main_app"],
         })
     procs.sort(key=lambda p: p["rss"], reverse=True)
     return procs

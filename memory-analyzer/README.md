@@ -120,3 +120,5 @@ macOS/Windows 都激进缓存，**"空闲内存≈浪费"**。报告展示内存
 ```
 
 `kind`：`"app"`（GUI 应用，优雅退出走 osascript/CloseMainWindow）或 `"process"`（后台进程，走 SIGTERM/Stop-Process）。`comm` 必须与扫描时 `ps comm` 完全一致（双键校验用）。
+
+**target 必须是应用主进程**（scan 里 `is_main_app=true` 的那个，comm 形如 `<app_root>/Contents/MacOS/<binary>`），**绝不能是 helper/子进程**——杀 helper 应用会立即重生，主程序毫发无伤（"点了没反应"）。按 `app_root` 分组，不同 `app_root`（如 WeChat vs wechatwebdevtools）不能混组。详见 `references/macos.md` 聚合规则。scan 每个 process 字段：`pid, ppid, user, rss, cpu, name, comm, bundle_id, kind, app_root, is_main_app`。
