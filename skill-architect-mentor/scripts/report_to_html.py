@@ -9,6 +9,9 @@ MD 报告是唯一事实来源；本脚本只做格式转换，保证 HTML 与 M
     python3 report_to_html.py <报告.md> [输出.html]
 不指定输出时，默认同名 .html，与输入同目录。
 
+HTML 不再内嵌被分析 skill 的源码附录；要看源码，去本地保留目录（默认 ./skill-src/<skill名>/）。
+--skill-dir 参数已废弃：传入只会打印提示，不再嵌入任何源码。
+
 依赖 Python markdown 库；缺失时自动安装（--user，失败再试 --break-system-packages）。
 """
 import sys
@@ -121,11 +124,6 @@ body {
 .content tr:nth-child(even) td { background: #fbfcfd; }
 .content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .content a { color: var(--accent); }
-.content details.src-file { margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--soft); }
-.content details.src-file > summary { cursor: pointer; padding: 8px 12px; font-weight: 500; }
-.content details.src-file[open] > summary { border-bottom: 1px solid var(--border); }
-.content details.src-file .src-md { padding: 12px 16px; max-height: 70vh; overflow: auto; background: var(--bg); }
-.content details.src-file > pre { margin: 0; padding: 12px 16px; max-height: 70vh; overflow: auto; background: #1e1e2e; color: #e6e6e6; border-radius: 0 0 6px 6px; }
 @media (max-width: 720px) {
   .page { flex-direction: column; }
   .toc { position: static; width: 100%; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
@@ -159,47 +157,16 @@ HTML_DOC = """<!doctype html>
 """
 
 
-def build_appendix(skill_dir):
-    """把被分析 skill 目录里的每个源文件嵌进可折叠 <details>，附在报告末尾。
-    .md 文件渲染成 HTML 便于直接读；其它文件用 <pre> 原样显示。"""
-    if not skill_dir or not os.path.isdir(skill_dir):
-        return ""
-    skip_dirs = {".git", "node_modules", "__pycache__"}
-    blocks = []
-    for root, dirs, files in os.walk(skill_dir):
-        dirs[:] = [d for d in dirs if d not in skip_dirs]
-        for fn in sorted(files):
-            if fn in (".DS_Store",):
-                continue
-            full = os.path.join(root, fn)
-            rel = os.path.relpath(full, skill_dir)
-            try:
-                with open(full, "r", encoding="utf-8") as f:
-                    content = f.read()
-            except Exception:
-                continue  # 跳过二进制 / 不可读文件
-            if fn.lower().endswith(".md"):
-                inner = md_to_html(content)
-                rendered = f'<div class="src-md">{inner}</div>'
-            else:
-                rendered = f'<pre><code>{html.escape(content)}</code></pre>'
-            blocks.append(
-                f'<details class="src-file"><summary><code>{html.escape(rel)}</code></summary>{rendered}</details>'
-            )
-    if not blocks:
-        return ""
-    out = '\n<h2 id="原文附录">原文附录（折叠阅读）</h2>'
-    out += "\n<p>下面是被分析 skill 的原始文件，点击文件名展开直接阅读（.md 已渲染，其它为原样代码）。</p>"
-    return out + "\n" + "\n".join(blocks)
-
-
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="把 skill 学习报告 .md 转成自包含 HTML")
     ap.add_argument("report", help="报告 .md 文件")
     ap.add_argument("output", nargs="?", help="输出 .html（默认同名 .html）")
-    ap.add_argument("--skill-dir", help="被分析 skill 的目录；给出则在 HTML 末尾追加「原文附录（折叠）」")
+    ap.add_argument("--skill-dir", help="(已废弃) 不再嵌源码附录；源码请看本地保留目录 ./skill-src/<skill名>/")
     args = ap.parse_args()
+
+    if args.skill_dir:
+        print("[note] --skill-dir 已废弃：HTML 不再内嵌源码附录，源码请看本地保留目录（如 ./skill-src/<skill名>/）。")
 
     src = args.report
     out = args.output
@@ -210,7 +177,6 @@ def main():
         md_text = f.read()
 
     body = md_to_html(md_text, with_toc=True)
-    body += build_appendix(args.skill_dir)
 
     m = re.search(r"<h1[^>]*>(.*?)</h1>", body, re.S)
     title = html.unescape(re.sub(r"<[^>]+>", "", m.group(1))) if m else os.path.basename(src)
